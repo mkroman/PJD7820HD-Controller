@@ -1,2 +1,4 @@
-build/
-sdkconfig.old
+/build/
+/sdkconfig
+/sdkconfig.old
+/components/pjd7820hd/include/pjd7820hd/commands.h

@@ -3,7 +3,6 @@
 # project subdirectory.
 #
 
-PROJECT_NAME := hello-world
+PROJECT_NAME := pjd7820hd-controller
 
 include $(IDF_PATH)/make/project.mk
-
