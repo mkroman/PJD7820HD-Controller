@@ -1,126 +1,189 @@
+#include <string.h>
+
 #include "esp_log.h"
 #include "esp_task.h"
 
 #include "pjd7820hd/pjd7820hd.h"
 #include "pjd7820hd/commands.h"
 
-// #define BUF_SIZE (127)
-
-// static const char CMD_READ_POWER_STATUS[] = {
-//     0x07, 0x14, 0x00, 0x05, 0x00, 0x34, 0x00, 0x00, 0x11, 0x00, 0x5E
-// };
-
-// static const char CMD_POWER_ON[] = {
-//     0x06, 0x14, 0x00, 0x04, 0x00, 0x34, 0x11, 0x00, 0x00, 0x5D,
-// };
-
-// static const char CMD_POWER_OFF[] = {
-//     0x06, 0x14, 0x00, 0x04, 0x00, 0x34, 0x11, 0x01, 0x00, 0x5E,
-// };
-
-
-// static void uart_task(void *parameters) {
-//     // Configure the UART driver.
-//     uart_config_t uart_config = {
-//         .baud_rate = 115200,
-//         .data_bits = UART_DATA_8_BITS,
-//         .parity    = UART_PARITY_DISABLE,
-//         .stop_bits = UART_STOP_BITS_1,
-//         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
-//     };
-
-//     uart_param_config(UART_NUM_2, &uart_config);
-//     uart_set_pin(UART_NUM_2, GPIO_NUM_17, GPIO_NUM_16, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-//     uart_driver_install(UART_NUM_2, BUF_SIZE * 2, 0, 0, NULL, 0);
-
-//     // Configure a temporary buffer for the incoming data
-//     uint8_t *data = (uint8_t *) malloc(BUF_SIZE);
-
-//     uart_write_bytes(UART_NUM_2, CMD_POWER_ON, sizeof(CMD_POWER_OFF));
-
-//     while (true) {
-//         // off status: 0x5 0x14 0 0x3 0 0 0 0 0x17
-//         uart_write_bytes(UART_NUM_2, CMD_READ_POWER_STATUS, sizeof(CMD_READ_POWER_STATUS));
-
-//         int len = uart_read_bytes(UART_NUM_2, data, BUF_SIZE, 20 / portTICK_RATE_MS);
-
-//         if (len > 0) {
-//             printf("read %d bytes\n", len);
-
-//             for (int i = 0; i < len; i++) {
-//                 printf("%#x ", data[i]);
-//             }
-
-//             printf("\n");
-//             vTaskDelay(500 / portTICK_RATE_MS);
-//         }
-//     }
-// }
+#define BUF_SIZE (127)
 
 static const char* TAG = "pjd7820hd";
 
-esp_err_t pjd7820hd_init(const pjd7820hd_init_config_t* config) {
-  ESP_LOGI(TAG, "Initialized PJD7820HD driver");
+esp_err_t pjd7820hd_init(const pjd7820hd_init_config_t* config, pjd7820hd_ctx_t** ctx) {
+    esp_err_t res = ESP_FAIL;
+    pjd7820hd_ctx_t* ctx_p;
 
-  pjd7820hd_ctx_t* pjd7820hd_ctx = malloc(sizeof(pjd7820hd_ctx_t));
+    ctx_p = (pjd7820hd_ctx_t*)malloc(sizeof(pjd7820hd_ctx_t));
 
-  if (pjd7820hd_ctx == NULL) {
-    ESP_LOGE(TAG, "Not enough memory to allocate pj7820hd_ctx_t");
+    if (ctx_p == NULL)
+        return ESP_ERR_NO_MEM;
 
-    return NULL;
-  }
+    *ctx = ctx_p;
 
-  QueueHandle_t rx_queue = xQueueCreate(10, sizeof(pjd7820hd_cmd)); // fixme: response
+    // Configure the UART driver.
+    uart_config_t uart_config = {
+        .baud_rate = 115200,
+        .data_bits = UART_DATA_8_BITS,
+        .parity    = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
+    };
 
-  if (rx_queue == NULL) {
-    ESP_LOGE(TAG, "xQueueCreate for rx_queue failed");
+    res = uart_param_config(config->uart_num, &uart_config);
 
-    return NULL;
-  }
+    if (res != ESP_OK) {
+        goto uart_fail;
+    }
 
-  QueueHandle_t tx_queue = xQueueCreate(10, sizeof(pjd7820hd_cmd));
+    res = uart_set_pin(config->uart_num, config->tx_io_num, config->rx_io_num, config->rts_io_num, config->cts_io_num);
 
-  if (tx_queue == NULL) {
-    ESP_LOGE(TAG, "xQueueCreate for tx_queue failed");
+    if (res != ESP_OK) {
+        goto uart_fail;
+    }
 
-    return NULL;
-  }
+    res = uart_driver_install(config->uart_num, BUF_SIZE * 2, 0, 0, NULL, 0);
 
-  TaskHandle_t rx_task, tx_task;
-  BaseType_t x_returned;
+    if (res != ESP_OK) {
+        goto uart_fail;
+    }
 
-  x_returned = xTaskCreate(pjd7820hd_recv_task, "pj7820hd_recv", 1024, pjd7820hd_ctx, ESP_TASK_MAIN_PRIO, &rx_task);
+    ctx_p->uart_num = config->uart_num;
 
-  if (x_returned != pdPASS) {
-    ESP_LOGE(TAG, "xTaskCreate failed");
+    // Allocate a read/write buffer.
+    ctx_p->buffer = (uint8_t*)malloc(BUF_SIZE);
 
-    return NULL;
-  }
+    uart_read_bytes(ctx_p->uart_num, ctx_p->buffer, BUF_SIZE, 200 / portTICK_RATE_MS);
 
-  x_returned = xTaskCreate(pjd7820hd_send_task, "pj7820hd_send", 1024, pjd7820hd_ctx, ESP_TASK_MAIN_PRIO, &tx_task);
+    ESP_LOGI(TAG, "Initialized PJD7820HD driver on UART %d", ctx_p->uart_num);
 
-  if (x_returned != pdPASS) {
-    ESP_LOGE(TAG, "xTaskCreate failed");
+    return ESP_OK;
 
-    return NULL;
-  }
+uart_fail:
+    ESP_LOGE(TAG, "UART init failed");
 
-  return ESP_OK;
+    return res;
 }
 
 
-esp_err_t pjd7820hd_send_command(const pjd7820hd_ctx_t* ctx, int cmd) {
-  return ESP_OK;
+void pjd7820hd_free(pjd7820hd_ctx_t* ctx)
+{
+    if (ctx == NULL)
+        return;
+
+    if (ctx->buffer)
+        free(ctx->buffer);
+
+    ESP_ERROR_CHECK(uart_driver_delete(ctx->uart_num));
+
+    free(ctx);
 }
 
-void pjd7820hd_recv_task(void* ctx) {
-  while (1) {
-    vTaskDelay(500 / portTICK_RATE_MS);
-  }
+esp_err_t pjd7820hd_send_command(const pjd7820hd_ctx_t* ctx, int cmd)
+{
+    int res;
+    pjd7820hd_command_t* command = (pjd7820hd_command_t*)&pjd7820hd_commands[cmd];
+
+    ESP_LOGI(TAG, "Sending command %d to UART %d", cmd, ctx->uart_num);
+
+    res = uart_write_bytes(ctx->uart_num, command->command, command->command_len);
+
+    if (res == -1) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ESP_LOGD(TAG, "Wrote %d bytes to UART FIFO", res);
+
+    return ESP_OK;
 }
 
-void pjd7820hd_send_task(void* ctx) {
-  while (1) {
-    vTaskDelay(500 / portTICK_RATE_MS);
-  }
+bool pjd7820hd_cmd_is_ack(uint8_t* buf, int len)
+{
+    int res;
+
+    if (len < sizeof(PJD7820HD_CMD_ACK))
+        return false;
+
+    res = memcmp(buf, &PJD7820HD_CMD_ACK, sizeof(PJD7820HD_CMD_ACK));
+
+    return res == 0;
+}
+
+esp_err_t pjd7820hd_read_command(const pjd7820hd_ctx_t* ctx, int* length)
+{
+    int res;
+
+    res = uart_read_bytes(ctx->uart_num, ctx->buffer, BUF_SIZE, 20 / portTICK_RATE_MS);
+
+    if (res == -1) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    *length = res;
+
+    ESP_LOGI(TAG, "Read %d bytes from UART %d", res, ctx->uart_num);
+    ESP_LOG_BUFFER_HEX(TAG, ctx->buffer, res);
+
+    return ESP_OK;
+}
+
+esp_err_t pjd7820hd_power_on(const pjd7820hd_ctx_t* ctx)
+{
+    int len;
+    esp_err_t res = ESP_FAIL;
+
+    res = pjd7820hd_send_command(ctx, (int)CMD_POWER_TURN_ON);
+
+    if (res != ESP_OK) {
+        goto fail;
+    }
+
+    res = pjd7820hd_read_command(ctx, &len);
+
+    if (res != ESP_OK || len == 0) {
+        goto fail;
+    }
+
+    if (!pjd7820hd_cmd_is_ack(ctx->buffer, len)) {
+        ESP_LOGE(TAG, "power on fail: expected ack");
+
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+
+fail:
+    ESP_LOGE(TAG, "power on fail");
+    return res;
+}
+
+esp_err_t pjd7820hd_power_off(const pjd7820hd_ctx_t* ctx)
+{
+    int len;
+    esp_err_t res = ESP_FAIL;
+
+    res = pjd7820hd_send_command(ctx, (int)CMD_POWER_TURN_OFF);
+
+    if (res != ESP_OK) {
+        goto fail;
+    }
+
+    res = pjd7820hd_read_command(ctx, &len);
+
+    if (res != ESP_OK || len == 0) {
+        goto fail;
+    }
+
+    if (memcmp(ctx->buffer, "\x00\x03\x14\x00\x00\x00\x14", 7) != 0)
+    {
+        ESP_LOGE(TAG, "power off fail: expected ack");
+
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+
+fail:
+    ESP_LOGE(TAG, "power off fail");
+    return res;
 }

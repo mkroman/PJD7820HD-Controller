@@ -13,7 +13,7 @@ typedef enum {
 {%- for command in commands %}
   {{command[0]}} = {{loop.index-1}},
 {%- endfor %}
-} pjd7820hd_command_e;
+} pjd7820hd_command;
 
 static const pjd7820hd_command_t pjd7820hd_commands[] = {
 {%- for command in commands %}

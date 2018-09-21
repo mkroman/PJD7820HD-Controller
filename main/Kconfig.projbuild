@@ -1,0 +1,63 @@
+menu "PJD7820HD Controller"
+
+config WIFI_SSID
+    string "WiFi SSID"
+    default "myssid"
+    help
+        SSID (network name) for the example to connect to.
+
+config WIFI_PASSWORD
+    string "WiFi Password"
+    default "mypassword"
+    help
+        WiFi password (WPA or WPA2) for the example to use.
+
+config BROKER_URL
+    string "Broker URL"
+    default "mqtt://iot.eclipse.org"
+    help
+        URL of the broker to connect to
+
+config BROKER_URL_FROM_STDIN
+  bool
+  default y if BROKER_URL = "FROM_STDIN"
+
+config MQTT_AVAILABILITY_TOPIC
+    string "MQTT Availability Topic"
+    default "pjd7820hd/availability"
+    help
+        Status topic to send online and offline availability to
+
+config MQTT_AVAILABILITY_ONLINE_MSG
+    string "MQTT Online Availability Message"
+    default "online"
+
+config MQTT_AVAILABILITY_OFFLINE_MSG
+    string "MQTT status to publish as a last will when we disconnect"
+    default "offline"
+
+config MQTT_CMD_POWER_TOPIC
+    string "MQTT topic to subscribe to for power commands"
+    default "pjd7820hd/power"
+
+config MQTT_CMD_POWER_ON_MSG
+    string "MQTT message to receive on the power command topic to turn on power"
+    default "ON"
+
+config MQTT_CMD_POWER_OFF_MSG
+    string "MQTT message to receive on the power command topic to turn off power"
+    default "OFF"
+
+config MQTT_STATUS_TOPIC
+    string "MQTT status topic"
+    default "pjd7820hd"
+
+config MQTT_STATUS_ON_MSG
+    string "MQTT status on message"
+    default "ON"
+
+config MQTT_STATUS_OFF_MSG
+    string "MQTT status off message"
+    default "OFF"
+
+endmenu
